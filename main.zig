@@ -22,7 +22,7 @@ fn getColorForHex(v: u8) []const u8 {
 
 const reset = "\x1b[0m";
 
-const hex_lut = blk: {
+const color_hex_lut = blk: {
     @setEvalBranchQuota(100_000);
     var table: [256][]const u8 = undefined;
     for (0..256) |i| {
@@ -33,13 +33,23 @@ const hex_lut = blk: {
     break :blk table;
 };
 
+const plain_hex_lut = blk: {
+    @setEvalBranchQuota(100_000);
+    var table: [256][]const u8 = undefined;
+    for (0..256) |i| {
+        const b: u8 = @intCast(i);
+        table[i] = std.fmt.comptimePrint("{x:0>2}", .{b});
+    }
+    break :blk table;
+};
+
 pub fn main() !void {
     var stdout_buf: [8 * 1024]u8 = undefined;
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
     const stdout: *std.io.Writer = &stdout_writer.interface;
 
     var read_buf: [64 * 1024]u8 = undefined;
-    var streaming_mode = false;
+    var input_is_stdin = false;
 
     const file_or_stdin = blk: {
         if (std.os.argv.len > 1) {
@@ -66,14 +76,26 @@ pub fn main() !void {
 
             break :blk f;
         } else {
-            streaming_mode = true;
+            input_is_stdin = true;
             break :blk std.fs.File.stdin();
         }
     };
 
+    const no_color = std.posix.getenv("NO_COLOR") != null or
+        !std.posix.isatty(std.posix.STDOUT_FILENO);
+
     var stdin_reader = file_or_stdin.reader(&read_buf);
 
     const stdin: *std.io.Reader = &stdin_reader.interface;
+
+    run_loop(no_color, input_is_stdin, stdin, stdout) catch |err| switch (err) {
+        error.WriteFailed => {},
+    };
+}
+
+fn run_loop(no_color: bool, streaming: bool, stdin: *std.io.Reader, stdout: *std.io.Writer) !void {
+    const hex_lut = if (no_color) &plain_hex_lut else &color_hex_lut;
+    const line_reset: []const u8 = if (no_color) "" else reset;
 
     var row_buf: [16]u8 = undefined;
     var buffer_alignment: usize = 0;
@@ -94,11 +116,9 @@ pub fn main() !void {
         row_alignment += 1;
         buffer_alignment += 1;
         if (row_alignment == 16) {
-            try stdout.print("  {s}{s}\n", .{ reset, row_buf });
-            if (streaming_mode) {
-                stdout.flush() catch |e| switch (e) {
-                    error.WriteFailed => return,
-                };
+            try stdout.print("  {s}{s}\n", .{ line_reset, row_buf });
+            if (streaming) {
+                try stdout.flush();
             }
             row_alignment = 0;
         } else if (row_alignment % 2 == 0) {
@@ -110,7 +130,7 @@ pub fn main() !void {
             const missing_bytes = (16 - row_alignment) % 16;
             const missing_spaces = missing_bytes / 2;
             if (missing_bytes > 0 or row_alignment > 0) {
-                try stdout.print("{s} {s}{s}\n", .{ spaces_array[0 .. missing_bytes * 2 + missing_spaces], reset, row_buf[0..row_alignment] });
+                try stdout.print("{s} {s}{s}\n", .{ spaces_array[0 .. missing_bytes * 2 + missing_spaces], line_reset, row_buf[0..row_alignment] });
             }
         },
         else => {
@@ -118,7 +138,5 @@ pub fn main() !void {
         },
     }
 
-    stdout.flush() catch |e| switch (e) {
-        error.WriteFailed => {},
-    };
+    try stdout.flush();
 }
