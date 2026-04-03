@@ -22,12 +22,24 @@ fn getColorForHex(v: u8) []const u8 {
 
 const reset = "\x1b[0m";
 
+const hex_lut = blk: {
+    @setEvalBranchQuota(100_000);
+    var table: [256][]const u8 = undefined;
+    for (0..256) |i| {
+        const b: u8 = @intCast(i);
+        const color = getColorForHex(b);
+        table[i] = color ++ std.fmt.comptimePrint("{x:0>2}", .{b});
+    }
+    break :blk table;
+};
+
 pub fn main() !void {
-    var stdout_buf: [1024]u8 = undefined;
+    var stdout_buf: [8 * 1024]u8 = undefined;
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
     const stdout: *std.io.Writer = &stdout_writer.interface;
 
-    var read_buf: [1024]u8 = undefined;
+    var read_buf: [64 * 1024]u8 = undefined;
+    var streaming_mode = false;
 
     const file_or_stdin = blk: {
         if (std.os.argv.len > 1) {
@@ -54,6 +66,7 @@ pub fn main() !void {
 
             break :blk f;
         } else {
+            streaming_mode = true;
             break :blk std.fs.File.stdin();
         }
     };
@@ -71,7 +84,7 @@ pub fn main() !void {
             try stdout.print("{x:0>8}: ", .{buffer_alignment});
         }
 
-        try stdout.print("{s}{x:0>2}", .{ getColorForHex(b), b });
+        try stdout.writeAll(hex_lut[b]);
         if (b >= ' ' and b <= '~') {
             row_buf[row_alignment] = b;
         } else {
@@ -82,9 +95,11 @@ pub fn main() !void {
         buffer_alignment += 1;
         if (row_alignment == 16) {
             try stdout.print("  {s}{s}\n", .{ reset, row_buf });
-            stdout.flush() catch |e| switch (e) {
-                error.WriteFailed => return,
-            };
+            if (streaming_mode) {
+                stdout.flush() catch |e| switch (e) {
+                    error.WriteFailed => return,
+                };
+            }
             row_alignment = 0;
         } else if (row_alignment % 2 == 0) {
             try stdout.writeAll(" ");
