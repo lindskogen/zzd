@@ -23,8 +23,6 @@ fn getColorForHex(v: u8) []const u8 {
 const reset = "\x1b[0m";
 
 pub fn main() !void {
-    var row_buf: [16]u8 = undefined;
-
     var stdout_buf: [1024]u8 = undefined;
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
     const stdout: *std.io.Writer = &stdout_writer.interface;
@@ -63,8 +61,9 @@ pub fn main() !void {
     var stdin_reader = file_or_stdin.reader(&read_buf);
 
     const stdin: *std.io.Reader = &stdin_reader.interface;
+
+    var row_buf: [16]u8 = undefined;
     var buffer_alignment: usize = 0;
-    var space_alignment: usize = 0;
     var row_alignment: usize = 0;
 
     while (stdin.takeByte()) |b| {
@@ -79,18 +78,17 @@ pub fn main() !void {
             row_buf[row_alignment] = '.';
         }
 
-        space_alignment += 1;
         row_alignment += 1;
         buffer_alignment += 1;
         if (row_alignment == 16) {
             try stdout.print("  {s}{s}\n", .{ reset, row_buf });
-            try stdout.flush();
-            space_alignment = 0;
+            stdout.flush() catch |e| switch (e) {
+                error.WriteFailed => return,
+            };
             row_alignment = 0;
-        } else if (space_alignment == 2) {
-            try stdout.print(" ", .{});
-            space_alignment = 0;
-        } else {}
+        } else if (row_alignment % 2 == 0) {
+            try stdout.writeAll(" ");
+        }
     } else |err| switch (err) {
         error.EndOfStream => {
             const spaces_array = " " ** 40;
@@ -100,9 +98,12 @@ pub fn main() !void {
                 try stdout.print("{s} {s}{s}\n", .{ spaces_array[0 .. missing_bytes * 2 + missing_spaces], reset, row_buf[0..row_alignment] });
             }
         },
-        else => {},
+        else => {
+            try stdout.print("Read error: {s}\n", .{@errorName(err)});
+        },
     }
 
-    try stdout.print("\n", .{});
-    try stdout.flush();
+    stdout.flush() catch |e| switch (e) {
+        error.WriteFailed => {},
+    };
 }
