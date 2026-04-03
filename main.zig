@@ -48,7 +48,7 @@ pub fn main() !void {
                     std.process.exit(1);
                 },
                 else => {
-                    try stdout.print("Failed to read: {s} reason: {:}\n", .{ path, e });
+                    try stdout.print("Failed to read: {s} reason: {s}\n", .{ path, @errorName(e) });
                     try stdout.flush();
                     std.process.exit(1);
                 },
@@ -84,6 +84,7 @@ pub fn main() !void {
         buffer_alignment += 1;
         if (row_alignment == 16) {
             try stdout.print("  {s}{s}\n", .{ reset, row_buf });
+            try stdout.flush();
             space_alignment = 0;
             row_alignment = 0;
         } else if (space_alignment == 2) {
