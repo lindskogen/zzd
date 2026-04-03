@@ -29,8 +29,39 @@ pub fn main() !void {
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
     const stdout: *std.io.Writer = &stdout_writer.interface;
 
-    var stdin_buf: [1024]u8 = undefined;
-    var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
+    var read_buf: [1024]u8 = undefined;
+
+    const file_or_stdin = blk: {
+        if (std.os.argv.len > 1) {
+            const path_null_terminated: [*:0]u8 = std.os.argv[1];
+            const path: [:0]const u8 = std.mem.span(path_null_terminated);
+
+            const f = std.fs.cwd().openFile(path, .{ .mode = .read_only }) catch |e| switch (e) {
+                error.AccessDenied => {
+                    try stdout.print("Not allowed to read file: {s}\n", .{path});
+                    try stdout.flush();
+                    std.process.exit(1);
+                },
+                error.FileNotFound => {
+                    try stdout.print("File not found: {s}\n", .{path});
+                    try stdout.flush();
+                    std.process.exit(1);
+                },
+                else => {
+                    try stdout.print("Failed to read: {s} reason: {:}\n", .{ path, e });
+                    try stdout.flush();
+                    std.process.exit(1);
+                },
+            };
+
+            break :blk f;
+        } else {
+            break :blk std.fs.File.stdin();
+        }
+    };
+
+    var stdin_reader = file_or_stdin.reader(&read_buf);
+
     const stdin: *std.io.Reader = &stdin_reader.interface;
     var buffer_alignment: usize = 0;
     var space_alignment: usize = 0;
