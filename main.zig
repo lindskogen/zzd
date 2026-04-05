@@ -20,6 +20,14 @@ fn getColorForHex(v: u8) []const u8 {
     };
 }
 
+fn getColorForHexInverted(v: u8) []const u8 {
+    return switch (v) {
+        0x00 => Colors.c00,
+        0xff => Colors.cFF,
+        else => nbr_colors[v & 0x0F],
+    };
+}
+
 const reset = "\x1b[0m";
 
 const color_hex_lut = blk: {
@@ -28,6 +36,17 @@ const color_hex_lut = blk: {
     for (0..256) |i| {
         const b: u8 = @intCast(i);
         const color = getColorForHex(b);
+        table[i] = color ++ std.fmt.comptimePrint("{x:0>2}", .{b});
+    }
+    break :blk table;
+};
+
+const inverted_color_hex_lut = blk: {
+    @setEvalBranchQuota(100_000);
+    var table: [256][]const u8 = undefined;
+    for (0..256) |i| {
+        const b: u8 = @intCast(i);
+        const color = getColorForHexInverted(b);
         table[i] = color ++ std.fmt.comptimePrint("{x:0>2}", .{b});
     }
     break :blk table;
@@ -50,10 +69,21 @@ pub fn main() !void {
 
     var read_buf: [64 * 1024]u8 = undefined;
     var input_is_stdin = false;
+    var inverted = false;
+
+    var arg_idx: usize = 1;
+    while (arg_idx < std.os.argv.len) : (arg_idx += 1) {
+        const arg: [:0]const u8 = std.mem.span(std.os.argv[arg_idx]);
+        if (std.mem.eql(u8, arg, "-i")) {
+            inverted = true;
+        } else {
+            break;
+        }
+    }
 
     const file_or_stdin = blk: {
-        if (std.os.argv.len > 1) {
-            const path_null_terminated: [*:0]u8 = std.os.argv[1];
+        if (arg_idx < std.os.argv.len) {
+            const path_null_terminated: [*:0]u8 = std.os.argv[arg_idx];
             const path: [:0]const u8 = std.mem.span(path_null_terminated);
 
             const f = std.fs.cwd().openFile(path, .{ .mode = .read_only }) catch |e| switch (e) {
@@ -88,13 +118,13 @@ pub fn main() !void {
 
     const stdin: *std.io.Reader = &stdin_reader.interface;
 
-    run_loop(no_color, input_is_stdin, stdin, stdout) catch |err| switch (err) {
+    run_loop(no_color, inverted, input_is_stdin, stdin, stdout) catch |err| switch (err) {
         error.WriteFailed => {},
     };
 }
 
-fn run_loop(no_color: bool, streaming: bool, stdin: *std.io.Reader, stdout: *std.io.Writer) !void {
-    const hex_lut = if (no_color) &plain_hex_lut else &color_hex_lut;
+fn run_loop(no_color: bool, inverted: bool, streaming: bool, stdin: *std.io.Reader, stdout: *std.io.Writer) !void {
+    const hex_lut = if (no_color) &plain_hex_lut else if (inverted) &inverted_color_hex_lut else &color_hex_lut;
     const line_reset: []const u8 = if (no_color) "" else reset;
 
     var row_buf: [16]u8 = undefined;
