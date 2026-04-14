@@ -62,19 +62,26 @@ const plain_hex_lut = blk: {
     break :blk table;
 };
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    const gpa = init.gpa;
+    const io = init.io;
+
+    const ptr = try gpa.create(i32);
+    defer gpa.destroy(ptr);
+
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+
     var stdout_buf: [8 * 1024]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
-    const stdout: *std.io.Writer = &stdout_writer.interface;
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
+    const stdout: *std.Io.Writer = &stdout_writer.interface;
 
     var read_buf: [64 * 1024]u8 = undefined;
     var input_is_stdin = false;
     var inverted = false;
 
     var arg_idx: usize = 1;
-    while (arg_idx < std.os.argv.len) : (arg_idx += 1) {
-        const arg: [:0]const u8 = std.mem.span(std.os.argv[arg_idx]);
-        if (std.mem.eql(u8, arg, "-i")) {
+    while (arg_idx < args.len) : (arg_idx += 1) {
+        if (std.mem.eql(u8, args[arg_idx], "-i")) {
             inverted = true;
         } else {
             break;
@@ -82,11 +89,9 @@ pub fn main() !void {
     }
 
     const file_or_stdin = blk: {
-        if (arg_idx < std.os.argv.len) {
-            const path_null_terminated: [*:0]u8 = std.os.argv[arg_idx];
-            const path: [:0]const u8 = std.mem.span(path_null_terminated);
-
-            const f = std.fs.cwd().openFile(path, .{ .mode = .read_only }) catch |e| switch (e) {
+        if (arg_idx < args.len) {
+            const path = args[arg_idx];
+            const f = std.Io.Dir.cwd().openFile(io, path, .{ .mode = .read_only }) catch |e| switch (e) {
                 error.AccessDenied => {
                     try stdout.print("Not allowed to read file: {s}\n", .{path});
                     try stdout.flush();
@@ -107,23 +112,23 @@ pub fn main() !void {
             break :blk f;
         } else {
             input_is_stdin = true;
-            break :blk std.fs.File.stdin();
+            break :blk std.Io.File.stdin();
         }
     };
 
-    const no_color = std.posix.getenv("NO_COLOR") != null or
-        !std.posix.isatty(std.posix.STDOUT_FILENO);
+    const no_color = init.environ_map.get("NO_COLOR") != null or
+        !try std.Io.File.isTty(std.Io.File.stdout(), io);
 
-    var stdin_reader = file_or_stdin.reader(&read_buf);
+    var stdin_reader = file_or_stdin.reader(io, &read_buf);
 
-    const stdin: *std.io.Reader = &stdin_reader.interface;
+    const stdin: *std.Io.Reader = &stdin_reader.interface;
 
     run_loop(no_color, inverted, input_is_stdin, stdin, stdout) catch |err| switch (err) {
         error.WriteFailed => {},
     };
 }
 
-fn run_loop(no_color: bool, inverted: bool, streaming: bool, stdin: *std.io.Reader, stdout: *std.io.Writer) !void {
+fn run_loop(no_color: bool, inverted: bool, streaming: bool, stdin: *std.Io.Reader, stdout: *std.Io.Writer) !void {
     const hex_lut = if (no_color) &plain_hex_lut else if (inverted) &inverted_color_hex_lut else &color_hex_lut;
     const line_reset: []const u8 = if (no_color) "" else reset;
 

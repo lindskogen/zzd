@@ -7,6 +7,8 @@ An opinionated port of xxd to zig
 
 ## How to build
 
+Use Zig 0.16.
+
 ```bash
 zig build-exe --name zzd -O ReleaseFast main.zig
 ```
