@@ -117,7 +117,7 @@ pub fn main(init: std.process.Init) !void {
     };
 
     const no_color = init.environ_map.get("NO_COLOR") != null or
-        !try std.Io.File.isTty(std.Io.File.stdout(), io);
+        !try std.Io.File.stdout().isTty(io);
 
     var stdin_reader = file_or_stdin.reader(io, &read_buf);
 
